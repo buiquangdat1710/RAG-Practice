@@ -14,7 +14,8 @@ def main():
     df = pd.read_csv("hoanghamobile.csv")
     df['information'] = df.apply(build_combine_row, axis=1)
 
-    vector_db = VectorDatabase(db_type="mongodb")
+    vector_db = VectorDatabase(db_type="supabase")
+    # vector_db.client.delete_collection("products") Uncomment if db_type = "qdrant" and you want to reset the collection
     embedding = Embeddings(model_name="text-embedding-3-small", type="openai")
 
     inserted_count = 0
@@ -73,3 +74,18 @@ Luôn giữ thái độ lịch sự, chuyên nghiệp và hỗ trợ hết mình
 
 if __name__ == "__main__":
     main()
+
+# SQL commands to create the necessary table and index in Supabase
+# -- First, enable the vector extension
+# CREATE EXTENSION IF NOT EXISTS vector;
+
+# -- Then create the table
+# CREATE TABLE IF NOT EXISTS products (
+#     id SERIAL PRIMARY KEY,
+#     title TEXT NOT NULL UNIQUE,
+#     information TEXT,
+#     embedding VECTOR(1536)
+# );
+
+# -- Create an index on the title for faster queries
+# CREATE INDEX IF NOT EXISTS idx_products_title ON products(title);
