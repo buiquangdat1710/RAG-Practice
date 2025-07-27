@@ -33,20 +33,56 @@ class VectorDatabase:
                 supabase_key=key
                 )
             self.client = supabase
+    def _ensure_collection_exists(self, collection_name: str):
+        """Ensure collection exists for Qdrant, create if it doesn't"""
+        if self.db_type == "qdrant":
+            if not self.client.collection_exists(collection_name=collection_name):
+                print(f"[Info] Collection '{collection_name}' not found. Creating it...")
+                self.client.create_collection(
+                    collection_name=collection_name,
+                    vectors_config=qdrant_models.VectorParams(
+                        size=1536,  # adjust size based on your embedding model
+                        distance=qdrant_models.Distance.COSINE
+                    )
+                )
+                
+                # Create index for title field to enable filtering
+                print(f"[Info] Creating index for 'title' field...")
+                self.client.create_payload_index(
+                    collection_name=collection_name,
+                    field_name="title",
+                    field_schema=qdrant_models.PayloadSchemaType.KEYWORD
+                )
+                return True  # Collection was created
+        return False  # Collection already existed or not Qdrant
     def insert_document(self, collection_name: str, document: dict):
         if self.db_type == "mongodb":
             db = self.client.get_database("vector_db")
             collection = db[collection_name]
             collection.insert_one(document)
         elif self.db_type == "chromadb":
-            self.client.add_documents(
-                collection_name=collection_name,
-                documents=[document]
+            collection = self.client.get_or_create_collection(name=collection_name)
+            collection.add(
+                documents=[document["information"]],
+                embeddings=[document["embedding"]],
+                ids=[document["title"]]
             )
         elif self.db_type == "qdrant":
+            self._ensure_collection_exists(collection_name)
+            
+            # Insert the document as a point
             self.client.upsert(
                 collection_name=collection_name,
-                points=[qdrant_models.PointStruct(id=document['title'], vector=document['embedding'], payload=document)]
+                points=[
+                    {
+                        "id": hash(document["title"]) % (2**63),  # Generate unique ID from title
+                        "vector": document["embedding"],
+                        "payload": {
+                            "title": document["title"],
+                            "information": document["information"]
+                        }
+                    }
+                ]
             )
         elif self.db_type == "supabase":
             self.client.table(collection_name).insert(document).execute()
@@ -67,19 +103,38 @@ class VectorDatabase:
             ])
             return list(results)
         elif self.db_type == "chromadb":
-            results = self.client.query(
-                collection_name=collection_name,
-                query_vector=query_vector,
-                limit=limit
+            collection = self.client.get_or_create_collection(name=collection_name)
+            results = collection.query(
+                query_embeddings=[query_vector],
+                n_results=limit
             )
-            return results
+            docs = []
+            for i in range(len(results["ids"][0])):
+                docs.append({
+                    "title": results["ids"][0][i],
+                    "information": results["documents"][0][i]
+                })
+            return docs
         elif self.db_type == "qdrant":
+            if not self.client.collection_exists(collection_name=collection_name):
+                print(f"[Warning] Collection '{collection_name}' doesn't exist for querying")
+                return []
+                
             results = self.client.search(
                 collection_name=collection_name,
                 query_vector=query_vector,
                 limit=limit
             )
-            return results
+            
+            # Format results to match expected structure
+            formatted_results = []
+            for result in results:
+                formatted_results.append({
+                    "title": result.payload["title"],
+                    "information": result.payload["information"],
+                    "score": result.score
+                })
+            return formatted_results
         elif self.db_type == "supabase":
             response = self.client.table(collection_name).select("*").execute()
             return response.data
@@ -89,15 +144,37 @@ class VectorDatabase:
             collection = db[collection_name]
             return collection.count_documents(filter_query) > 0
         elif self.db_type == "chromadb":
-            # ChromaDB không hỗ trợ document-level metadata query, return False để luôn insert
-            return False
+            try:
+                collection = self.client.get_or_create_collection(name=collection_name)
+                # Lấy toàn bộ ID hiện có trong collection
+                all_ids = collection.get()["ids"]
+                return filter_query["title"] in all_ids
+            except Exception as e:
+                print(f"Error checking existence in ChromaDB: {e}")
+                return False
         elif self.db_type == "qdrant":
-            result = self.client.scroll(
-                collection_name=collection_name,
-                scroll_filter={"must": [{"key": k, "match": {"value": v}} for k, v in filter_query.items()]},
-                limit=1
-            )
-            return len(result[0]) > 0
+            if not self.client.collection_exists(collection_name=collection_name):
+                print(f"[Info] Collection '{collection_name}' doesn't exist yet")
+                return False
+                
+            # Search for document with matching title
+            try:
+                result = self.client.scroll(
+                    collection_name=collection_name,
+                    scroll_filter={
+                        "must": [
+                            {
+                                "key": "title",
+                                "match": {"value": filter_query["title"]}
+                            }
+                        ]
+                    },
+                    limit=1
+                )
+                return len(result[0]) > 0
+            except Exception as e:
+                print(f"Error checking document existence in Qdrant: {e}")
+                return False
         elif self.db_type == "supabase":
             response = self.client.table(collection_name).select("*").eq("title", filter_query["title"]).execute()
             return len(response.data) > 0
