@@ -180,3 +180,11 @@ class VectorDatabase:
             return len(response.data) > 0
         else:
             raise ValueError("Unsupported database type")
+    def count_documents(self, collection_name: str) -> int:
+        if self.db_type == "mongodb":
+            db = self.client.get_database("vector_db")  # Đảm bảo đúng tên DB
+            collection = db[collection_name]
+            return collection.count_documents({})
+        else:
+            raise NotImplementedError("count_documents chỉ hỗ trợ MongoDB trong phiên bản này.")
+
