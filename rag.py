@@ -14,7 +14,7 @@ def main():
     df = pd.read_csv("hoanghamobile.csv")
     df['information'] = df.apply(build_combine_row, axis=1)
 
-    vector_db = VectorDatabase(db_type="supabase")
+    vector_db = VectorDatabase(db_type="mongodb")
     # vector_db.client.delete_collection("products") Uncomment if db_type = "qdrant" and you want to reset the collection
     embedding = Embeddings(model_name="text-embedding-3-small", type="openai")
 
@@ -45,19 +45,19 @@ def main():
     results = vector_db.query(
         collection_name="products",
         query_vector=query_embedding,
-        limit=7
+        limit=5
     )
-    print("Thông tin được tìm kiếm thây:")
-    for result in results:
-        print(f"Title: {result['title']}, Information: {result['information']}")
-        print("-" * 50)
+    # print("Thông tin được tìm kiếm thây:")
+    # for result in results:
+    #     print(f"Title: {result['title']}, Information: {result['information']}")
+    #     print("-" * 50)
     
     # Prompt LLM -> LLM answer query based on RAG
     prompt = f"Trả lời câu hỏi dựa trên thông tin sau:\n{query}\n\n"
     for result in results:
         prompt += f"Thông tin: {result['information']}\n"
     prompt += "Trả lời: "
-    print(prompt)
+    # print(prompt)
 
     answer = embedding.client.chat.completions.create(
         model="gpt-4o-mini",
