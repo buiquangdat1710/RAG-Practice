@@ -2,7 +2,7 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
-import google.generativeai as genai
+from google import genai
 
 load_dotenv()
 
